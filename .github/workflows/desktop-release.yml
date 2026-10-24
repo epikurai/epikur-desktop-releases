@@ -55,6 +55,7 @@ jobs:
           SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
           SOURCE_TREE: ${{ steps.request.outputs.source_tree }}
           SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
           SOURCE_PATH: ${{ runner.temp }}/source-inspection
           FETCH_MODE: inspect
           REQUIRE_SOURCE_MAIN_HEAD: ${{ github.event_name == 'workflow_run' && 'true' || 'false' }}
@@ -97,6 +98,7 @@ jobs:
       - name: Fetch exact candidate and pinned signer, then remove the read-only key
         env:
           SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: bash tools/checkout-source.sh
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -220,6 +222,7 @@ jobs:
       - name: Fetch pinned signer and candidate source strictly as data on a fresh runner
         env:
           SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
         run: bash tools/checkout-source.sh
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -338,6 +341,7 @@ jobs:
       - name: Fetch private source ancestry metadata with a read-only key
         env:
           SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
           SOURCE_PATH: ${{ runner.temp }}/source-history
           FETCH_MODE: history
         run: bash tools/checkout-source.sh

@@ -7,7 +7,9 @@ trap 'rm -f "$key_file" "$known_hosts"' EXIT
 test -n "$SOURCE_DEPLOY_KEY"
 printf '%s\n' "$SOURCE_DEPLOY_KEY" > "$key_file"
 unset SOURCE_DEPLOY_KEY
-curl --fail --silent --show-error https://api.github.com/meta | jq -er '.ssh_keys[] | "github.com " + .' > "$known_hosts"
+test -n "$GH_TOKEN"
+curl --fail --silent --show-error --retry 3 --connect-timeout 15 --max-time 60 --header "Authorization: Bearer $GH_TOKEN" https://api.github.com/meta | jq -er '.ssh_keys[] | "github.com " + .' > "$known_hosts"
+unset GH_TOKEN
 printf -v key_argument '%q' "$key_file"
 printf -v hosts_argument '%q' "$known_hosts"
 export GIT_SSH_COMMAND="ssh -i $key_argument -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$hosts_argument"
