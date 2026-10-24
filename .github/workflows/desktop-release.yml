@@ -234,6 +234,15 @@ jobs:
       - name: Extract using the pinned safe ZIP reader and verify source and full prepared inventory
         id: unsigned
         run: node tools/release-automation.cjs extract-unsigned
+      # GitHub-hosted runner HTTP/3 can drop Apple's ticket lookup (stapler 68).
+      # https://github.com/actions/runner-images/issues/14924
+      # This disposable signing VM alone falls back to HTTPS over TCP.
+      - name: Use reliable HTTPS for Apple ticket delivery on this disposable runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' 'block return out quick proto udp from any to any port 443' | sudo pfctl -f -
+          sudo pfctl -E
       - name: Sign and notarize only the prepared app
         env:
           CSC_LINK: ${{ secrets.CSC_LINK }}
