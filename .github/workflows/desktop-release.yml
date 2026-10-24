@@ -1,0 +1,345 @@
+name: Desktop release
+
+on:
+  workflow_run:
+    workflows: ['Epikur QA candidate']
+    types: [completed]
+    branches: ['requests/qa/**']
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel
+        required: true
+        type: choice
+        options: [qa, stable]
+      qa_tag:
+        description: Existing signed QA release tag to promote or reissue
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.repository == 'epikurai/epikur-desktop-releases' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    environment: desktop-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      channel: ${{ steps.request.outputs.channel }}
+      source_sha: ${{ steps.request.outputs.source_sha }}
+      source_tree: ${{ steps.request.outputs.source_tree }}
+      version: ${{ steps.request.outputs.version }}
+      tag: ${{ steps.request.outputs.tag }}
+      release_id: ${{ steps.request.outputs.release_id }}
+      automation_sha: ${{ steps.request.outputs.automation_sha }}
+      trusted_signer_sha: ${{ steps.request.outputs.trusted_signer_sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test public release validation
+        run: node --test tools/release-automation.test.cjs
+      - name: Resolve immutable source request or signed QA promotion
+        id: request
+        env:
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_QA_TAG: ${{ inputs.qa_tag }}
+          TRUSTED_SIGNER_SHA: ${{ vars.EPIKUR_TRUSTED_SIGNER_SHA }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/release-automation.cjs resolve
+      - name: Verify source commit, Git tree and main ancestry without running source code
+        env:
+          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+          SOURCE_TREE: ${{ steps.request.outputs.source_tree }}
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          SOURCE_PATH: ${{ runner.temp }}/source-inspection
+          FETCH_MODE: inspect
+          REQUIRE_SOURCE_MAIN_HEAD: ${{ github.event_name == 'workflow_run' && 'true' || 'false' }}
+        run: bash tools/checkout-source.sh
+
+  build:
+    needs: inspect
+    environment: desktop-source
+    outputs:
+      unsigned_artifact_id: ${{ steps.unsigned_artifact.outputs.artifact-id }}
+    runs-on: macos-15
+    timeout-minutes: 55
+    permissions:
+      contents: read
+    env:
+      SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
+      RELEASE_VERSION: ${{ needs.inspect.outputs.version }}
+      RELEASE_TAG: ${{ needs.inspect.outputs.tag }}
+      RELEASE_ID: ${{ needs.inspect.outputs.release_id }}
+      EXPECTED_SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      EXPECTED_SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
+      EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
+      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/epikur-release-browsers
+      TRUST_FILE: ${{ runner.temp }}/updater-trust.json
+      RELEASE_DIRECTORY: ${{ runner.temp }}/signed-release
+      SOURCE_PATH: ${{ github.workspace }}/source
+      SIGNER_PATH: ${{ github.workspace }}/signer
+      TRUSTED_SIGNER_SHA: ${{ needs.inspect.outputs.trusted_signer_sha }}
+      UNSIGNED_DIRECTORY: ${{ runner.temp }}/unsigned-release
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.inspect.outputs.automation_sha }}
+          persist-credentials: false
+      - name: Verify Apple Silicon release runner
+        run: test "$(uname -m)" = arm64
+      - name: Fetch exact candidate and pinned signer, then remove the read-only key
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+        run: bash tools/checkout-source.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: source/desktop-app/package-lock.json
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13.16'
+      - name: Install pinned test dependencies without signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python -m pip install --disable-pip-version-check PyYAML==6.0.3 croniter==6.0.0 python-dateutil==2.9.0.post0 pytz==2026.5 six==1.17.0 > "$RUNNER_TEMP/python-install.log" 2>&1; then
+            printf 'Pinned test dependency installation failed.\n'; exit 1
+          fi
+          cd "$SOURCE_PATH/desktop-app"
+          if ! npm ci --ignore-scripts > "$RUNNER_TEMP/npm-install.log" 2>&1; then
+            printf 'Locked desktop dependency installation failed.\n'; exit 1
+          fi
+          if ! node node_modules/electron/install.js > "$RUNNER_TEMP/electron-install.log" 2>&1; then
+            printf 'Pinned Electron installation failed.\n'; exit 1
+          fi
+          if ! node node_modules/playwright-core/cli.js install chromium > "$RUNNER_TEMP/browser-install.log" 2>&1; then
+            printf 'Pinned browser installation failed.\n'; exit 1
+          fi
+          printf 'Pinned desktop and test dependencies installed.\n'
+      - name: Verify complete desktop tests, TypeScript and production renderer
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SOURCE_PATH/desktop-app"
+          export EPIKUR_TEST_PYTHON="$(command -v python)"
+          if ! npm test > "$RUNNER_TEMP/desktop-tests.log" 2>&1; then
+            printf 'Desktop tests failed; private source logs remain on the ephemeral runner only.\n'; exit 1
+          fi
+          if ! npx --no-install tsc --noEmit > "$RUNNER_TEMP/typescript.log" 2>&1; then
+            printf 'Desktop TypeScript verification failed.\n'; exit 1
+          fi
+          if ! npm run build > "$RUNNER_TEMP/renderer-build.log" 2>&1; then
+            printf 'Production renderer build failed.\n'; exit 1
+          fi
+          printf 'Desktop tests, TypeScript and renderer build passed.\n'
+      - name: Generate public channel trust
+        run: node tools/release-automation.cjs trust
+      - name: Package and prepare the exact normal desktop app without signing credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$SOURCE_PATH/desktop-app"
+          feed_url="https://raw.githubusercontent.com/epikurai/epikur-desktop-releases/feeds/channels/$RELEASE_CHANNEL.json"
+          if ! node scripts/package.cjs --channel "$RELEASE_CHANNEL" --version "$RELEASE_VERSION" --source-sha "$SOURCE_SHA" --source-tree "$SOURCE_TREE" --feed-url "$feed_url" --trust-file "$TRUST_FILE" > "$RUNNER_TEMP/package.log" 2>&1; then
+            printf 'Desktop channel packaging failed.\n'; exit 1
+          fi
+          app_name='Epikur.app'; if test "$RELEASE_CHANNEL" = qa; then app_name='Epikur QA.app'; fi
+          if ! node "$SIGNER_PATH/desktop-app/scripts/prepare-desktop-release.cjs" --app "$SOURCE_PATH/desktop-app/build/$app_name" --source "$SOURCE_PATH" --receipt "$RUNNER_TEMP/prepared-release.json" --trust "$TRUST_FILE" > "$RUNNER_TEMP/preparation.log" 2>&1; then
+            printf 'Exact source and prepared bundle verification failed.\n'; exit 1
+          fi
+          printf 'Normal desktop channel package prepared from the verified source.\n'
+      - name: Retain only the unsigned application and its prepared inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$UNSIGNED_DIRECTORY"
+          cp "$RUNNER_TEMP/prepared-release.json" "$UNSIGNED_DIRECTORY/prepared-release.json"
+          cd "$SOURCE_PATH/desktop-app/build"
+          app_name='Epikur.app'; if test "$RELEASE_CHANNEL" = qa; then app_name='Epikur QA.app'; fi
+          /usr/bin/zip -q -r -y -X "$UNSIGNED_DIRECTORY/unsigned-app.zip" "$app_name"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: unsigned_artifact
+        with:
+          name: unsigned-desktop-${{ needs.inspect.outputs.channel }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/unsigned-release/unsigned-app.zip
+            ${{ runner.temp }}/unsigned-release/prepared-release.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Remove private source and signer checkout on every outcome
+        if: always()
+        shell: bash
+        run: rm -rf "$SOURCE_PATH" "$SIGNER_PATH"
+
+  sign:
+    needs: [inspect, build]
+    environment: desktop-signing
+    outputs:
+      signed_artifact_id: ${{ steps.signed_artifact.outputs.artifact-id }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
+      RELEASE_VERSION: ${{ needs.inspect.outputs.version }}
+      RELEASE_TAG: ${{ needs.inspect.outputs.tag }}
+      RELEASE_ID: ${{ needs.inspect.outputs.release_id }}
+      EXPECTED_SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      EXPECTED_SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
+      EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
+      TRUSTED_SIGNER_SHA: ${{ needs.inspect.outputs.trusted_signer_sha }}
+      TRUST_FILE: ${{ runner.temp }}/updater-trust.json
+      RELEASE_DIRECTORY: ${{ runner.temp }}/signed-release
+      UNSIGNED_DIRECTORY: ${{ runner.temp }}/unsigned-release
+      UNSIGNED_EXTRACTION: ${{ runner.temp }}/unsigned-extracted
+      SOURCE_PATH: ${{ github.workspace }}/source
+      SIGNER_PATH: ${{ github.workspace }}/signer
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.inspect.outputs.automation_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+      - name: Verify Apple Silicon signing runner
+        run: test "$(uname -m)" = arm64
+      - name: Fetch pinned signer and candidate source strictly as data on a fresh runner
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+        run: bash tools/checkout-source.sh
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.build.outputs.unsigned_artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/unsigned-release
+      - name: Recreate reviewed public channel trust
+        run: node tools/release-automation.cjs trust
+      - name: Extract using the pinned safe ZIP reader and verify source and full prepared inventory
+        id: unsigned
+        run: node tools/release-automation.cjs extract-unsigned
+      - name: Sign and notarize only the prepared app
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APP_PATH: ${{ steps.unsigned.outputs.app_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          node "$SIGNER_PATH/desktop-app/scripts/sign-desktop-release.cjs" --input-app "$APP_PATH" --output "$RELEASE_DIRECTORY" --scratch "$RUNNER_TEMP/apple-signing-private" --keychain "$RUNNER_TEMP/apple-signing-private/release.keychain-db"
+      - name: Sign QA update envelope with only the QA manifest key
+        if: needs.inspect.outputs.channel == 'qa'
+        env:
+          MANIFEST_KEY: ${{ secrets.EPIKUR_QA_MANIFEST_KEY }}
+        run: bash tools/sign-manifest.sh
+      - name: Sign stable update envelope with only the stable manifest key
+        if: needs.inspect.outputs.channel == 'stable'
+        env:
+          MANIFEST_KEY: ${{ secrets.EPIKUR_STABLE_MANIFEST_KEY }}
+        run: bash tools/sign-manifest.sh
+      - name: Independently verify exact public output files after credential cleanup
+        run: node tools/release-automation.cjs verify-bundle
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: signed_artifact
+        with:
+          name: signed-desktop-${{ needs.inspect.outputs.channel }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/signed-release/*.zip
+            ${{ runner.temp }}/signed-release/desktop-release.json
+            ${{ runner.temp }}/signed-release/manifest.json
+          retention-days: 90
+          compression-level: 0
+          if-no-files-found: error
+      - name: Remove source and private temporary material on every outcome
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f "$RUNNER_TEMP/source-readonly-key" "$RUNNER_TEMP/github-known-hosts" "$RUNNER_TEMP/manifest-signing.pem"
+          rm -rf "$RUNNER_TEMP/apple-signing-private" "$SOURCE_PATH" "$SIGNER_PATH"
+
+  publish:
+    needs: [inspect, sign]
+    environment: desktop-publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    concurrency:
+      group: desktop-channel-publication-${{ needs.inspect.outputs.channel }}
+      cancel-in-progress: false
+    env:
+      RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
+      RELEASE_DIRECTORY: ${{ runner.temp }}/signed-release
+      EXPECTED_SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      EXPECTED_SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
+      EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.inspect.outputs.automation_sha }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.sign.outputs.signed_artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/signed-release
+      - name: Verify signed envelope, receipt, source and archive independently
+        id: artifact
+        run: node tools/release-automation.cjs verify-bundle
+      - name: Publish immutable signed installer and evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.artifact.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.artifact.outputs.version }}
+          RELEASE_ZIP: ${{ steps.artifact.outputs.zip }}
+          AUTOMATION_SHA: ${{ needs.inspect.outputs.automation_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'Apple Developer ID signed and notarized %s desktop release.\n\nPrivate source commit: %s\n\nThe signed update manifest and sanitized signing receipt accompany this installer.\n' "$RELEASE_CHANNEL" "$EXPECTED_SOURCE_SHA" > "$RUNNER_TEMP/release-notes.md"
+          flags=(); title="Epikur $RELEASE_VERSION"
+          if test "$RELEASE_CHANNEL" = qa; then flags+=(--prerelease); title="Epikur QA $RELEASE_VERSION"; fi
+          if gh release view "$RELEASE_TAG" --repo epikurai/epikur-desktop-releases > /dev/null 2>&1; then
+            node tools/release-automation.cjs verify-upload
+          else
+            gh release create "$RELEASE_TAG" "$RELEASE_DIRECTORY/$RELEASE_ZIP" "$RELEASE_DIRECTORY/desktop-release.json" "$RELEASE_DIRECTORY/manifest.json" --repo epikurai/epikur-desktop-releases --target "$AUTOMATION_SHA" --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md" "${flags[@]}"
+          fi
+      - name: Read published files back and verify exact archive bytes before exposing the update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4; do
+            if node tools/release-automation.cjs verify-upload; then exit 0; fi
+            if test "$attempt" = 4; then exit 1; fi
+            sleep 2
+          done
+      - name: Fetch private source ancestry metadata with a read-only key
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          SOURCE_PATH: ${{ runner.temp }}/source-history
+          FETCH_MODE: history
+        run: bash tools/checkout-source.sh
+      - name: Atomically advance only this channel and preserve newer concurrent releases
+        env:
+          SOURCE_HISTORY: ${{ runner.temp }}/source-history
+        run: node tools/release-automation.cjs update-feed

@@ -1,0 +1,33 @@
+name: Epikur QA candidate
+
+on:
+  push:
+    branches: ['requests/qa/**']
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    if: github.repository == 'epikurai/epikur-desktop-releases'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Validate bounded request metadata without credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git diff --name-only HEAD^ HEAD)" = candidate.json
+          node - <<'NODE'
+          const fs=require('node:fs'),assert=require('node:assert/strict');
+          const stat=fs.lstatSync('candidate.json');assert(stat.isFile()&&!stat.isSymbolicLink()&&stat.size>0&&stat.size<=65536);
+          const value=JSON.parse(fs.readFileSync('candidate.json','utf8'));
+          assert.deepEqual(Object.keys(value).sort(),['schema','sourceSha','sourceTree']);assert.equal(value.schema,1);
+          assert.match(value.sourceSha,/^[a-f0-9]{40}$/);assert.match(value.sourceTree,/^[a-f0-9]{40}$/);
+          assert.equal(process.env.GITHUB_REF,'refs/heads/requests/qa/'+value.sourceSha);
+          console.log('QA request metadata checked; trusted main will independently verify it.');
+          NODE
