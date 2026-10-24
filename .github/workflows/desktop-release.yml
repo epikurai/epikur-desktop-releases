@@ -276,7 +276,7 @@ jobs:
 
   publish:
     needs: [inspect, sign]
-    environment: desktop-publish
+    environment: ${{ needs.inspect.outputs.channel == 'stable' && 'desktop-live' || 'desktop-publish' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     permissions:

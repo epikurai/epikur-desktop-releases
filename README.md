@@ -3,7 +3,7 @@
 This repository contains public release automation, public verification keys, signed update manifests and GitHub Release installers. The private source checkout, backend code and tests are never committed here or retained as artifacts; installer archives contain only the application payload intended for distribution.
 
 - **Epikur QA** receives a new Apple-signed, notarized build after a successful `main` CI run in `epikurai/epikur_2.0`. The private source workflow queues one immutable `requests/qa/<source SHA>` branch with a three-field `candidate.json`.
-- **Epikur** receives updates only through the manual **Desktop release** workflow. Choose `stable` and an existing QA release tag. The workflow verifies that QA release's Ed25519 signature and builds the stable app from the same source commit.
+- **Epikur** receives updates only through the manual **Desktop release** workflow followed by human approval. Choose `stable` and an existing QA release tag. The workflow verifies that QA release's Ed25519 signature and builds the stable app from the same source commit. Its signed artifact is available for installation before publication; the GitHub Release and live update feed remain blocked until the required reviewer approves the `desktop-live` environment.
 - The apps have separate bundle identities, local profiles, URL schemes, manifest keys and update feeds. They cannot install each other's updates. Separate local profiles do not create separate server accounts or backend data.
 
 ## Release flow
@@ -22,13 +22,15 @@ Public keys belong in `keys/qa.pem` and `keys/stable.pem`. Private keys never be
 
 | Environment | Secret | Purpose |
 | --- | --- | --- |
-| `desktop-source`, `desktop-signing`, `desktop-publish` | `EPIKUR_DESKTOP_SOURCE_KEY` | Read-only SSH deploy key for private source data and ancestry |
+| `desktop-source`, `desktop-signing`, `desktop-publish`, `desktop-live` | `EPIKUR_DESKTOP_SOURCE_KEY` | Read-only SSH deploy key for private source data and ancestry |
 | `desktop-signing` | `CSC_LINK`, `CSC_KEY_PASSWORD` | Existing encrypted Apple Developer ID identity and its password |
 | `desktop-signing` | `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER` | Existing Apple notarization credentials |
 | `desktop-signing` | `EPIKUR_QA_MANIFEST_KEY` | QA Ed25519 private key |
 | `desktop-signing` | `EPIKUR_STABLE_MANIFEST_KEY` | Stable Ed25519 private key |
 
 The `EPIKUR_TRUSTED_SIGNER_SHA` repository variable pins the reviewed private signer implementation independently of candidate changes. The source repository separately holds a repository-scoped queue deploy key. Its `EPIKUR_RELEASE_AUTOMATION_SHA` variable pins the reviewed automation commit on which requests are based. No personal GitHub access token is copied into either workflow.
+
+The `desktop-live` environment additionally requires approval by `epikurai`. Starting a manual stable build does not approve publication. QA publication continues through `desktop-publish`; it never approves or updates the live channel.
 
 Application test, compiler and package logs are kept only in the ephemeral runner's private temporary directory. They are not uploaded or printed in public CI logs. Uploaded release files are limited to the installer ZIP, a sanitized signing receipt and its signed manifest.
 
