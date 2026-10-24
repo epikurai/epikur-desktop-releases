@@ -2,11 +2,11 @@
   "schema": 1,
   "kind": "signed-desktop-release",
   "channel": "qa",
-  "version": "2.0.4-qa.1",
-  "sourceSha": "85002eaa2b060731d20979acd63949a3237f0e4a",
-  "sourceTree": "973f9e59c350bb2cea8ec454530852f3b538c441",
-  "workflowSha": "734d73145548a82fbdca40d968cb3dd642c7b93b",
-  "signingScriptSha256": "6bb032cce1bf90c3ea94ebff6a96140be8beb95c41839a8cd95af4defb786721",
+  "version": "2.0.6-qa.1",
+  "sourceSha": "a6f07593a198c76729863227fd39d90a41a6ee9e",
+  "sourceTree": "b18d8ccc9f57b2f80a72874a3f545ca1b0c7d7e8",
+  "workflowSha": "6e48fb580962f5b814e0b8669aeea3473efc0568",
+  "signingScriptSha256": "3e85e2ed4de1702559f3ddc568b9157b0b77e80dbee0c2805596304c2072ae93",
   "bundleId": "ai.epikur.desktop2.qa",
   "appName": "Epikur QA",
   "profileName": "Epikur QA",
@@ -14,7 +14,7 @@
   "teamId": "WJ9NY7Z3S7",
   "certificateSha256": "a54533a0d42c3f89834b101cee4a470911fb6c6b3b562ce749f10151e4d3066b",
   "notarization": {
-    "id": "f2107971-04da-4069-8404-ce5d927de54f",
+    "id": "5f25977a-7977-4fe9-a626-8fe5136574a2",
     "status": "Accepted"
   },
   "checks": {
@@ -26,7 +26,7 @@
     "payloadUnchanged": true,
     "channelIdentity": true
   },
-  "payloadFiles": 89,
+  "payloadFiles": 90,
   "payloadHashes": {
     "desktop/account.cjs": "576575236df99294d353f5c03dbfa3dadf614bde539ce22c50cb1f54809056c8",
     "desktop/assets/icon.icns": "b5cded6074d73a1be77266b84d44b7ebed233cc44ff4ecc1fc9ffecd828c77f7",
@@ -47,15 +47,15 @@
     "desktop/preload.cjs": "2bc340025cd54b4a3f3f74ae4f844a6540bf4c8d5b9c7a1806f45cdd8733898b",
     "desktop/recovery.cjs": "9f3f459a781d9cf6f9849f86f45c9c6d48fa38703bc272cb46a4be019dec4519",
     "desktop/release-channel.cjs": "0414242a0ceb67a7123296699debd4bb68233e06b45039ec10e43b18d0d59bb5",
-    "desktop/release.json": "fbc015fed2e71e54ecfc4c7a240390f27ed20fbd0a7bbf961f5eeb23aea199b8",
+    "desktop/release.json": "2eae1151e6dade37f3e504dd4d7a473875982a09868999f03509a2edc10ff04a",
     "desktop/update-menu.cjs": "11f924a737e149bcebbccda66a8752ba153b457dc3f60dc0066f9a689f5f324e",
     "desktop/updater-archive.cjs": "20927ebd3d5f0e155260ffe6c3890e8037be45757b8a071b538d56e52e2d74b4",
     "desktop/updater-native.cjs": "6bf0b9b1f49fbdfdfacc302a5da32acfe63be86dd1c0ef20bb8860b4f6ef7014",
     "desktop/updater-trust.json": "e50ce5a7c56d2e8ff6390cc66d722f83ed457afe8ea440e2132183cb12e14f60",
     "desktop/updater.cjs": "d74b876088f76037cec673cd71a4989b25410915a300a18f4815694893ac42ce",
-    "dist/app.html": "78c6e5f824125173f380c99990b4e7227021fd5e60c82d4a93495fa02c8afc47",
-    "dist/assets/app-BLmwde-q.js": "b810a87fb8e3e74b95efd9c22c5c150a2adc7e9ec7ae27a1d1d1b665497e15c7",
-    "dist/assets/app-Co10jEqg.css": "6b73e8709ee6bf4ce8e9c7005c5975ed75356dbd73c952b83363cec5309d907e",
+    "dist/app.html": "9ac77fcb84cd0b8db73aa7de52ccff9818a96e9ff64e42a16322006c0bfa45d7",
+    "dist/assets/app-Cg0e0K6g.js": "aeb0692d5f1ec52b1c045d2f1462618c38c53bb57954d861df5e10b41e632987",
+    "dist/assets/app-CK6Jolxf.css": "a3eda9a9da1011b4d6ee6b7156463ee43df61e5c3e4c43387fdf0777d1a4d6e3",
     "dist/assets/dataloen-B4XTBgn8.svg": "ed2cec029f242ae82d325be88715366b2dade6aee00906c71a07d8ba9523fb11",
     "dist/assets/e-conomic-DRJWk2BN.svg": "4acc9ef3f9629c45a0cdf927bdcde24fc2bdeee1ed499908e36a0d9722c92285",
     "dist/assets/KaTeX_AMS-Regular-BQhdFMY1.woff2": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308",
@@ -116,17 +116,18 @@
     "dist/assets/KaTeX_Size4-Regular-DWFBv043.ttf": "c647367d1dd4e162468717d020e1fc0f1dc5c26ebfdffbe55261713bf88c5877",
     "dist/assets/KaTeX_Typewriter-Regular-C0xS9mPB.woff": "e14fed02b1aba7ce9f5afd5844b5d0321b22351febc720e0de8b8723527609f7",
     "dist/assets/KaTeX_Typewriter-Regular-CO6r4hn1.woff2": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b",
-    "dist/assets/KaTeX_Typewriter-Regular-D3Ib7_Hf.ttf": "f01f3e87d9c6a61c0c081ceb577abd864eb00a612f7ac1620dd6915fad2ef5aa"
+    "dist/assets/KaTeX_Typewriter-Regular-D3Ib7_Hf.ttf": "f01f3e87d9c6a61c0c081ceb577abd864eb00a612f7ac1620dd6915fad2ef5aa",
+    "dist/epikur-logo.png": "a4953066cb187140b1e4ffd38034a072a27b5e387fec045f89a4acae68a230ba"
   },
-  "preparedMarkerSha256": "635ba589207e21b843cb9c20b4b07e0cf11ee599ad2540c6b7f055730214f58c",
+  "preparedMarkerSha256": "0202387244a8df1d71ed98ac9e8a77f647a3953382405b67b3667282df5f5fbd",
   "updateHelper": {
     "identifier": "ai.epikur.desktop2.qa.update-exchange",
     "preparedSha256": "0f721730e3cb3823ad1904373c3a71e0d3516a082172587210623e309d9e33e6",
-    "signedSha256": "cb8449ee31d0317010080acf2d04e3411100bf524dad21a27ca7b23bdcfff3d1"
+    "signedSha256": "7e1850d9891ce0e756fbad44f6d2e62bd123c0aa51578ec02525192f054d1327"
   },
   "archive": {
-    "file": "Epikur-QA-2.0.4-qa.1-darwin-arm64.zip",
-    "size": 298056758,
-    "sha256": "af3b75ff42b0c3b2ba4b259ed7787410eee68fdcfd31a5a648eeadeed1676ea3"
+    "file": "Epikur-QA-2.0.6-qa.1-darwin-arm64.zip",
+    "size": 298479763,
+    "sha256": "774e581fe5cbf843b9094e74ba84dc3cb88c67f5cfca381110151513cedfa9fa"
   }
 }
