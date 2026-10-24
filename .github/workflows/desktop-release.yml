@@ -80,14 +80,14 @@ jobs:
       EXPECTED_SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
       EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
       EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
-      PLAYWRIGHT_BROWSERS_PATH: ${{ runner.temp }}/epikur-release-browsers
-      TRUST_FILE: ${{ runner.temp }}/updater-trust.json
-      RELEASE_DIRECTORY: ${{ runner.temp }}/signed-release
       SOURCE_PATH: ${{ github.workspace }}/source
       SIGNER_PATH: ${{ github.workspace }}/signer
       TRUSTED_SIGNER_SHA: ${{ needs.inspect.outputs.trusted_signer_sha }}
-      UNSIGNED_DIRECTORY: ${{ runner.temp }}/unsigned-release
     steps:
+      - name: Initialize private release paths
+        shell: bash
+        run: |
+          printf 'PLAYWRIGHT_BROWSERS_PATH=%s/epikur-release-browsers\nTRUST_FILE=%s/updater-trust.json\nRELEASE_DIRECTORY=%s/signed-release\nUNSIGNED_DIRECTORY=%s/unsigned-release\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ needs.inspect.outputs.automation_sha }}
@@ -201,13 +201,13 @@ jobs:
       EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
       EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
       TRUSTED_SIGNER_SHA: ${{ needs.inspect.outputs.trusted_signer_sha }}
-      TRUST_FILE: ${{ runner.temp }}/updater-trust.json
-      RELEASE_DIRECTORY: ${{ runner.temp }}/signed-release
-      UNSIGNED_DIRECTORY: ${{ runner.temp }}/unsigned-release
-      UNSIGNED_EXTRACTION: ${{ runner.temp }}/unsigned-extracted
       SOURCE_PATH: ${{ github.workspace }}/source
       SIGNER_PATH: ${{ github.workspace }}/signer
     steps:
+      - name: Initialize private signing paths
+        shell: bash
+        run: |
+          printf 'TRUST_FILE=%s/updater-trust.json\nRELEASE_DIRECTORY=%s/signed-release\nUNSIGNED_DIRECTORY=%s/unsigned-release\nUNSIGNED_EXTRACTION=%s/unsigned-extracted\n' "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ needs.inspect.outputs.automation_sha }}
@@ -286,12 +286,14 @@ jobs:
       cancel-in-progress: false
     env:
       RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
-      RELEASE_DIRECTORY: ${{ runner.temp }}/signed-release
       EXPECTED_SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
       EXPECTED_SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
       EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
       EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
     steps:
+      - name: Initialize private publication path
+        shell: bash
+        run: printf 'RELEASE_DIRECTORY=%s/signed-release\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ needs.inspect.outputs.automation_sha }}
