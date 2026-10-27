@@ -1,0 +1,255 @@
+name: Desktop Windows release
+
+on:
+  workflow_run:
+    workflows: [Epikur Windows QA candidate]
+    types: [completed]
+    branches: ['requests/windows-qa/**']
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Windows release channel
+        required: true
+        type: choice
+        options: [qa, stable]
+      qa_tag:
+        description: Existing signed Windows QA tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    if: github.repository == 'epikurai/epikur-desktop-releases' && vars.EPIKUR_WINDOWS_RELEASE_ENABLED == 'true' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+    environment: desktop-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      channel: ${{ steps.request.outputs.channel }}
+      source_sha: ${{ steps.request.outputs.source_sha }}
+      source_tree: ${{ steps.request.outputs.source_tree }}
+      version: ${{ steps.request.outputs.version }}
+      tag: ${{ steps.request.outputs.tag }}
+      release_id: ${{ steps.request.outputs.release_id }}
+      automation_sha: ${{ steps.request.outputs.automation_sha }}
+      trusted_signer_sha: ${{ steps.request.outputs.trusted_signer_sha }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: node --test tools/windows-release.test.cjs
+      - name: Resolve exact Windows candidate or signed promotion
+        id: request
+        env:
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_QA_TAG: ${{ inputs.qa_tag }}
+          TRUSTED_SIGNER_SHA: ${{ vars.EPIKUR_WINDOWS_TRUSTED_SIGNER_SHA }}
+          WINDOWS_CERTIFICATE_SHA256: ${{ vars.EPIKUR_WINDOWS_CERTIFICATE_SHA256 }}
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/windows-release.cjs resolve
+      - name: Verify private source ancestry without executing candidate code
+        env:
+          SOURCE_SHA: ${{ steps.request.outputs.source_sha }}
+          SOURCE_TREE: ${{ steps.request.outputs.source_tree }}
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_PATH: ${{ runner.temp }}/source-inspection
+          FETCH_MODE: inspect
+          REQUIRE_SOURCE_MAIN_HEAD: ${{ github.event_name == 'workflow_run' && 'true' || 'false' }}
+        run: bash tools/checkout-source.sh
+
+  build:
+    needs: inspect
+    environment: desktop-source
+    runs-on: windows-2025
+    timeout-minutes: 45
+    outputs:
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+    env:
+      SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
+      RELEASE_VERSION: ${{ needs.inspect.outputs.version }}
+      TRUSTED_SIGNER_SHA: ${{ needs.inspect.outputs.trusted_signer_sha }}
+      WINDOWS_CERTIFICATE_SHA256: ${{ vars.EPIKUR_WINDOWS_CERTIFICATE_SHA256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.inspect.outputs.automation_sha }}
+          persist-credentials: false
+      - name: Initialize isolated Windows paths
+        shell: pwsh
+        run: |
+          "SOURCE_PATH=$env:RUNNER_TEMP\source" >> $env:GITHUB_ENV
+          "SIGNER_PATH=$env:RUNNER_TEMP\signer" >> $env:GITHUB_ENV
+          "PLAYWRIGHT_BROWSERS_PATH=$env:RUNNER_TEMP\browsers" >> $env:GITHUB_ENV
+          "TRUST_FILE=$env:RUNNER_TEMP\windows-trust.json" >> $env:GITHUB_ENV
+          "UNSIGNED_DIRECTORY=$env:RUNNER_TEMP\unsigned-windows" >> $env:GITHUB_ENV
+      - name: Fetch source and remove the read-only credential
+        shell: bash
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/checkout-source.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+      - name: Generate Windows-only public trust
+        run: node tools/windows-release.cjs trust
+      - name: Build and prepare without signing credentials
+        shell: pwsh
+        run: ./tools/windows-build.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: artifact
+        with:
+          name: unsigned-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/unsigned-windows/unsigned-windows.zip
+            ${{ runner.temp }}/unsigned-windows/prepared-windows.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - name: Remove private checkouts
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath $env:SOURCE_PATH, $env:SIGNER_PATH -Recurse -Force -ErrorAction SilentlyContinue
+
+  sign:
+    needs: [inspect, build]
+    environment: desktop-windows-signing
+    runs-on: windows-2025
+    timeout-minutes: 40
+    outputs:
+      artifact_id: ${{ steps.artifact.outputs.artifact-id }}
+    env:
+      SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
+      RELEASE_VERSION: ${{ needs.inspect.outputs.version }}
+      TRUSTED_SIGNER_SHA: ${{ needs.inspect.outputs.trusted_signer_sha }}
+      WINDOWS_CERTIFICATE_SHA256: ${{ vars.EPIKUR_WINDOWS_CERTIFICATE_SHA256 }}
+      WINDOWS_SIGNING_PROVIDER: certificate
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.inspect.outputs.automation_sha }}
+          persist-credentials: false
+      - name: Initialize isolated signing paths
+        shell: pwsh
+        run: |
+          "SOURCE_PATH=$env:RUNNER_TEMP\source" >> $env:GITHUB_ENV
+          "SIGNER_PATH=$env:RUNNER_TEMP\signer" >> $env:GITHUB_ENV
+          "TRUST_FILE=$env:RUNNER_TEMP\windows-trust.json" >> $env:GITHUB_ENV
+          "UNSIGNED_DIRECTORY=$env:RUNNER_TEMP\unsigned-windows" >> $env:GITHUB_ENV
+          "UNSIGNED_EXTRACTION=$env:RUNNER_TEMP\unsigned-extracted" >> $env:GITHUB_ENV
+          "RELEASE_DIRECTORY=$env:RUNNER_TEMP\signed-windows" >> $env:GITHUB_ENV
+      - name: Fetch candidate as data and the separately pinned signer
+        shell: bash
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: bash tools/checkout-source.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/unsigned-windows
+      - run: node tools/windows-release.cjs trust
+      - name: Sign and independently verify the prepared Windows application
+        shell: pwsh
+        env:
+          WINDOWS_PFX_BASE64: ${{ secrets.WINDOWS_PFX_BASE64 }}
+          WINDOWS_PFX_PASSWORD: ${{ secrets.WINDOWS_PFX_PASSWORD }}
+        run: ./tools/windows-sign.ps1
+      - name: Sign only the Windows QA manifest
+        if: needs.inspect.outputs.channel == 'qa'
+        env:
+          MANIFEST_KEY: ${{ secrets.EPIKUR_WINDOWS_QA_MANIFEST_KEY }}
+        run: node tools/windows-release.cjs sign-manifest
+      - name: Sign only the Windows stable manifest
+        if: needs.inspect.outputs.channel == 'stable'
+        env:
+          MANIFEST_KEY: ${{ secrets.EPIKUR_WINDOWS_STABLE_MANIFEST_KEY }}
+        run: node tools/windows-release.cjs sign-manifest
+      - run: node tools/windows-release.cjs verify-bundle
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        id: artifact
+        with:
+          name: signed-windows-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/signed-windows/*.zip
+            ${{ runner.temp }}/signed-windows/*-Setup.exe
+            ${{ runner.temp }}/signed-windows/windows-release.json
+            ${{ runner.temp }}/signed-windows/manifest.json
+          retention-days: 90
+          compression-level: 0
+          if-no-files-found: error
+      - name: Remove private checkouts and signing temporary files
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath $env:SOURCE_PATH, $env:SIGNER_PATH, "$env:RUNNER_TEMP\windows-signing-scratch", "$env:RUNNER_TEMP\windows-signing.pfx" -Recurse -Force -ErrorAction SilentlyContinue
+
+  publish:
+    needs: [inspect, sign]
+    environment: ${{ needs.inspect.outputs.channel == 'stable' && 'desktop-windows-live' || 'desktop-windows-publish' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    concurrency:
+      group: desktop-windows-publication-${{ needs.inspect.outputs.channel }}
+      cancel-in-progress: false
+    env:
+      RELEASE_CHANNEL: ${{ needs.inspect.outputs.channel }}
+      EXPECTED_SOURCE_SHA: ${{ needs.inspect.outputs.source_sha }}
+      EXPECTED_SOURCE_TREE: ${{ needs.inspect.outputs.source_tree }}
+      EXPECTED_VERSION: ${{ needs.inspect.outputs.version }}
+      EXPECTED_TAG: ${{ needs.inspect.outputs.tag }}
+      WINDOWS_CERTIFICATE_SHA256: ${{ vars.EPIKUR_WINDOWS_CERTIFICATE_SHA256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ needs.inspect.outputs.automation_sha }}
+          fetch-depth: 0
+      - run: echo "RELEASE_DIRECTORY=$RUNNER_TEMP/signed-windows" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          artifact-ids: ${{ needs.sign.outputs.artifact_id }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/signed-windows
+      - run: node tools/windows-release.cjs verify-bundle
+      - name: Publish immutable Windows installer and evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOMATION_SHA: ${{ needs.inspect.outputs.automation_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$EXPECTED_TAG" --repo epikurai/epikur-desktop-releases >/dev/null 2>&1; then
+            node tools/windows-release.cjs verify-upload
+          else
+            printf 'Windows x64 Epikur release.\n\nSource: %s\n\nSigned installer, payload and verified manifest are attached.\n' "$EXPECTED_SOURCE_SHA" > "$RUNNER_TEMP/windows-notes.md"
+            flags=(); if test "$RELEASE_CHANNEL" = qa; then flags+=(--prerelease); fi
+            gh release create "$EXPECTED_TAG" "$RELEASE_DIRECTORY"/* --repo epikurai/epikur-desktop-releases --target "$AUTOMATION_SHA" --title "Epikur Windows $EXPECTED_VERSION" --notes-file "$RUNNER_TEMP/windows-notes.md" "${flags[@]}"
+          fi
+      - name: Verify downloaded public bytes before advancing the Windows feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/windows-release.cjs verify-upload
+      - name: Fetch ancestry metadata with a read-only key
+        env:
+          SOURCE_DEPLOY_KEY: ${{ secrets.EPIKUR_DESKTOP_SOURCE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_PATH: ${{ runner.temp }}/source-history
+          FETCH_MODE: history
+        run: bash tools/checkout-source.sh
+      - name: Advance only this Windows channel
+        env:
+          SOURCE_HISTORY: ${{ runner.temp }}/source-history
+        run: node tools/windows-release.cjs update-feed
