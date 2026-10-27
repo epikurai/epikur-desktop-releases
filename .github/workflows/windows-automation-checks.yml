@@ -1,0 +1,25 @@
+name: Windows release automation checks
+
+on:
+  pull_request:
+    paths: ['.github/workflows/*windows*', 'tools/*windows*', 'WINDOWS.md']
+  push:
+    branches: [main]
+    paths: ['.github/workflows/*windows*', 'tools/*windows*', 'WINDOWS.md']
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '26'
+      - name: Verify Windows automation and existing Mac release contracts
+        run: node --test tools/*.test.cjs
